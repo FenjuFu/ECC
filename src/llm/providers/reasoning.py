@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 
 THINK_OPEN = "<think>"
@@ -44,6 +45,22 @@ def strip_reasoning(content: str, *, prefilled: bool = False) -> str:
         return content
 
     close = content.find(THINK_CLOSE)
-    if close == -1 or THINK_OPEN in content[:close]:
+    if close == -1 or THINK_OPEN in content[:close] or _is_json_document(content):
         return content
     return content[close + len(THINK_CLOSE) :].lstrip()
+
+
+def _is_json_document(content: str) -> bool:
+    """Whether ``content`` is one complete JSON object or array.
+
+    Reasoning followed by a closing tag is never valid JSON, so a structured
+    answer that carries the tag inside a string value is left whole.
+    """
+    stripped = content.strip()
+    if not stripped.startswith(("{", "[")):
+        return False
+    try:
+        json.loads(stripped)
+    except ValueError:
+        return False
+    return True

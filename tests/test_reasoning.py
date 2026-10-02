@@ -2,10 +2,12 @@ import json
 import urllib.request
 from io import BytesIO
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
-from llm.core.types import LLMInput, Message, Role
+from llm.core.interface import LLMProvider
+from llm.core.types import LLMInput, LLMOutput, Message, Role
 from llm.providers.astraflow import AstraflowProvider
 from llm.providers.ollama import OllamaProvider
 from llm.providers.openai import OpenAIProvider
@@ -36,12 +38,12 @@ LITERAL_ANSWERS = [
         ("17 * 3 = 51.</think>51", "17 * 3 = 51.</think>51"),
     ],
 )
-def test_strip_reasoning_default(content, expected):
+def test_strip_reasoning_default(content: str, expected: str) -> None:
     assert strip_reasoning(content) == expected
 
 
 @pytest.mark.parametrize("content", LITERAL_ANSWERS)
-def test_strip_reasoning_default_preserves_literal_tags(content):
+def test_strip_reasoning_default_preserves_literal_tags(content: str) -> None:
     assert strip_reasoning(content) == content
 
 
@@ -54,13 +56,17 @@ def test_strip_reasoning_default_preserves_literal_tags(content):
         ("plain answer", "plain answer"),
         ("Wrap it in <think> and </think> tags.", "Wrap it in <think> and </think> tags."),
         ("17 * 3 = 51.</think>", ""),
+        # A complete JSON answer is never reasoning plus a closing tag.
+        ('{"closing":"</think>"}', '{"closing":"</think>"}'),
+        ('  {"closing":"</think>","opening":"<think>"}\n', '  {"closing":"</think>","opening":"<think>"}\n'),
+        ('["</think>", 1]', '["</think>", 1]'),
     ],
 )
-def test_strip_reasoning_prefilled(content, expected):
+def test_strip_reasoning_prefilled(content: str, expected: str) -> None:
     assert strip_reasoning(content, prefilled=True) == expected
 
 
-def _openai_provider(content, **kwargs):
+def _openai_provider(content: str, **kwargs: Any) -> OpenAIProvider:
     provider = OpenAIProvider(api_key="test", **kwargs)
     message = SimpleNamespace(content=content, tool_calls=None)
     response = SimpleNamespace(
@@ -68,26 +74,27 @@ def _openai_provider(content, **kwargs):
         model="spark-x2.5",
         usage=None,
     )
-    provider.client = SimpleNamespace(
+    client: Any = SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **params: response))
     )
+    provider.client = client
     return provider
 
 
-def _ask(provider, **kwargs):
+def _ask(provider: LLMProvider, **kwargs: Any) -> LLMOutput:
     return provider.generate(LLMInput(messages=[Message(role=Role.USER, content="17*3?")], **kwargs))
 
 
-def test_openai_provider_strips_balanced_reasoning():
+def test_openai_provider_strips_balanced_reasoning() -> None:
     assert _ask(_openai_provider("<think>17 * 3 = 51.</think>51")).content == "51"
 
 
 @pytest.mark.parametrize("content", LITERAL_ANSWERS)
-def test_openai_provider_keeps_literal_tags(content):
+def test_openai_provider_keeps_literal_tags(content: str) -> None:
     assert _ask(_openai_provider(content)).content == content
 
 
-def test_openai_provider_close_only_needs_opt_in(monkeypatch):
+def test_openai_provider_close_only_needs_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OPENAI_PREFILLED_REASONING", raising=False)
     assert _ask(_openai_provider("17 * 3 = 51.</think>51")).content == "17 * 3 = 51.</think>51"
     assert _ask(_openai_provider("17 * 3 = 51.</think>51", prefilled_reasoning=True)).content == "51"
@@ -96,7 +103,7 @@ def test_openai_provider_close_only_needs_opt_in(monkeypatch):
     assert _ask(_openai_provider("17 * 3 = 51.</think>51")).content == "51"
 
 
-def test_hosted_provider_never_strips_close_only(monkeypatch):
+def test_hosted_provider_never_strips_close_only(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_PREFILLED_REASONING", "true")
     provider = AstraflowProvider(api_key="test")
     message = SimpleNamespace(content='{"closing":"</think>"}', tool_calls=None)
@@ -105,18 +112,19 @@ def test_hosted_provider_never_strips_close_only(monkeypatch):
         model="deepseek-v3.2",
         usage=None,
     )
-    provider.client = SimpleNamespace(
+    client: Any = SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **params: response))
     )
+    provider.client = client
 
     assert _ask(provider).content == '{"closing":"</think>"}'
 
 
-def _fake_ollama(monkeypatch, content):
-    sent = []
+def _fake_ollama(monkeypatch: pytest.MonkeyPatch, content: str) -> list[dict[str, Any]]:
+    sent: list[dict[str, Any]] = []
 
-    def fake_urlopen(request, timeout):
-        sent.append(json.loads(request.data))
+    def fake_urlopen(request: urllib.request.Request, timeout: float) -> BytesIO:
+        sent.append(json.loads(cast(bytes, request.data)))
         return BytesIO(json.dumps({"message": {"content": content}, "done_reason": "stop"}).encode())
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
@@ -124,14 +132,14 @@ def _fake_ollama(monkeypatch, content):
 
 
 @pytest.mark.parametrize("content", LITERAL_ANSWERS)
-def test_ollama_provider_keeps_literal_tags(monkeypatch, content):
+def test_ollama_provider_keeps_literal_tags(monkeypatch: pytest.MonkeyPatch, content: str) -> None:
     monkeypatch.delenv("OLLAMA_PREFILLED_REASONING", raising=False)
     _fake_ollama(monkeypatch, content)
 
     assert _ask(OllamaProvider()).content == content
 
 
-def test_ollama_provider_strips_prefilled_reasoning_when_declared(monkeypatch):
+def test_ollama_provider_strips_prefilled_reasoning_when_declared(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OLLAMA_PREFILLED_REASONING", raising=False)
     _fake_ollama(monkeypatch, "17 * 3 = 51.</think>51")
     assert _ask(OllamaProvider()).content == "17 * 3 = 51.</think>51"
@@ -141,7 +149,7 @@ def test_ollama_provider_strips_prefilled_reasoning_when_declared(monkeypatch):
     assert _ask(OllamaProvider()).content == "51"
 
 
-def test_ollama_stream_flag_still_strips_complete_message(monkeypatch):
+def test_ollama_stream_flag_still_strips_complete_message(monkeypatch: pytest.MonkeyPatch) -> None:
     # The provider always requests a single complete message, even when the
     # caller asks for streaming, so stripping sees the whole reply. If chunked
     # streaming is added, this needs an incremental stripper instead.
