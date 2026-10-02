@@ -92,26 +92,29 @@ class OllamaProvider(LLMProvider):
 
         Catalogued models answer from :attr:`ModelInfo.supports_tools`. Any other
         model is looked up once through ``/api/show``, whose ``capabilities``
-        list is what the installed model itself declares. A failed lookup counts
-        as no tool support.
+        list is what the installed model itself declares. Only an answered lookup
+        is cached: a failed one counts as no tool support for that request and
+        is retried on the next.
         """
         for info in self._models:
             if info.name == model:
                 return info.supports_tools
-        if model not in self._tool_support:
-            try:
-                req = urllib.request.Request(
-                    f"{self.base_url}/api/show",
-                    data=json.dumps({"model": model}).encode("utf-8"),
-                    headers={"Content-Type": "application/json"},
-                )
-                with urllib.request.urlopen(req, timeout=10) as response:
-                    capabilities = json.loads(response.read().decode("utf-8")).get("capabilities") or []
-                self._tool_support[model] = "tools" in capabilities
-            except Exception as e:
-                logger.warning("Could not read capabilities for Ollama model '%s': %s", model, type(e).__name__)
-                self._tool_support[model] = False
-        return self._tool_support[model]
+        if model in self._tool_support:
+            return self._tool_support[model]
+        try:
+            req = urllib.request.Request(
+                f"{self.base_url}/api/show",
+                data=json.dumps({"model": model}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=10) as response:
+                capabilities = json.loads(response.read().decode("utf-8")).get("capabilities") or []
+        except Exception as e:
+            logger.warning("Could not read capabilities for Ollama model '%s': %s", model, type(e).__name__)
+            return False
+        supports_tools = "tools" in capabilities
+        self._tool_support = {**self._tool_support, model: supports_tools}
+        return supports_tools
 
     def generate(self, input: LLMInput) -> LLMOutput:
         try:
