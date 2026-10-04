@@ -70,7 +70,7 @@ def test_strip_reasoning_prefilled_survives_deeply_nested_json() -> None:
     # Deep enough for json.loads to raise RecursionError on every supported Python.
     depth = 100_000
     content = "[" * depth + '"</think>"' + "]" * depth
-    assert strip_reasoning(content, prefilled=True) == '"' + "]" * depth
+    assert strip_reasoning(content, prefilled=True) == content
 
 
 def _openai_provider(content: str, **kwargs: Any) -> OpenAIProvider:

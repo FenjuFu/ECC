@@ -55,14 +55,17 @@ def _is_json_document(content: str) -> bool:
 
     Reasoning followed by a closing tag is never valid JSON, so a structured
     answer that carries the tag inside a string value is left whole. Input
-    nested too deeply to parse is not treated as JSON rather than failing the
-    request.
+    nested too deeply for the parser to finish is kept whole as well: reasoning
+    does not open with that many brackets, so cutting it would only risk
+    truncating a real answer.
     """
     stripped = content.strip()
     if not stripped.startswith(("{", "[")):
         return False
     try:
         json.loads(stripped)
-    except (ValueError, RecursionError):
+    except RecursionError:
+        return True
+    except ValueError:
         return False
     return True
