@@ -54,13 +54,15 @@ def _is_json_document(content: str) -> bool:
     """Whether ``content`` is one complete JSON object or array.
 
     Reasoning followed by a closing tag is never valid JSON, so a structured
-    answer that carries the tag inside a string value is left whole.
+    answer that carries the tag inside a string value is left whole. Input
+    nested too deeply to parse is not treated as JSON rather than failing the
+    request.
     """
     stripped = content.strip()
     if not stripped.startswith(("{", "[")):
         return False
     try:
         json.loads(stripped)
-    except ValueError:
+    except (ValueError, RecursionError):
         return False
     return True

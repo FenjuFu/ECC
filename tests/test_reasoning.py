@@ -66,6 +66,13 @@ def test_strip_reasoning_prefilled(content: str, expected: str) -> None:
     assert strip_reasoning(content, prefilled=True) == expected
 
 
+def test_strip_reasoning_prefilled_survives_deeply_nested_json() -> None:
+    # Deep enough for json.loads to raise RecursionError on every supported Python.
+    depth = 100_000
+    content = "[" * depth + '"</think>"' + "]" * depth
+    assert strip_reasoning(content, prefilled=True) == '"' + "]" * depth
+
+
 def _openai_provider(content: str, **kwargs: Any) -> OpenAIProvider:
     provider = OpenAIProvider(api_key="test", **kwargs)
     message = SimpleNamespace(content=content, tool_calls=None)
